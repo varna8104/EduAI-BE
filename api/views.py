@@ -6,6 +6,14 @@ from django.utils.decorators import method_decorator
 from django.contrib.auth.hashers import make_password, check_password
 import json
 from .models import Parent, Child, Registration
+from django.core.files.storage import default_storage
+import os
+import tempfile
+
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
 
 # Create your views here.
 
@@ -91,3 +99,29 @@ class LoginView(View):
             return JsonResponse({'success': True, 'children': children, 'parent_name': parent.name})
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class SummarizeView(View):
+    def post(self, request):
+        if 'file' not in request.FILES:
+            return JsonResponse({'error': 'No file uploaded.'}, status=400)
+        file = request.FILES['file']
+        ext = os.path.splitext(file.name)[1].lower()
+        text = ''
+        if ext == '.pdf' and PyPDF2:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                for chunk in file.chunks():
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+            with open(tmp_path, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                for page in reader.pages:
+                    text += page.extract_text() or ''
+            os.remove(tmp_path)
+        elif ext in ['.txt', '.md']:
+            text = file.read().decode('utf-8')
+        else:
+            return JsonResponse({'error': 'Unsupported file type.'}, status=400)
+        # TODO: Replace with real AI summarization
+        summary = text[:500] + ('...' if len(text) > 500 else '')
+        return JsonResponse({'summary': summary})
